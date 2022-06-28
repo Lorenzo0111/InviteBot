@@ -5,6 +5,7 @@ import { CommandInteraction, User, MessageEmbed, MessageActionRow, MessageButton
 import Invite from "../models/Invite";
 
 export default class InviteCommand extends BaseCommand {
+    lastSent: Map<string,Date> = new Map();
     
     constructor() {
         super("invite");
@@ -51,6 +52,14 @@ export default class InviteCommand extends BaseCommand {
     }
 
     private async sendInvite(interaction: CommandInteraction,target: User): Promise<void> {
+        if (this.lastSent.has(target.id)) {
+            const lastSent = this.lastSent.get(target.id);
+            if (lastSent != null && lastSent.getTime() + (1000 * 60 * Number(process.env.DELAY!!)) > new Date().getTime()) {
+                await interaction.editReply({ content: `You can only send an invite once every ${process.env.DELAY} minutes`});
+                return;
+            }
+        }
+        
         let invite = await Invite.findOne({from:interaction.user.id,to:target.id}).exec();
         
         if (invite) {
@@ -65,13 +74,13 @@ export default class InviteCommand extends BaseCommand {
             to: target.id
         });
 
-        invite.save();
+        await invite.save();
 
         interaction.editReply({
             content: `You have sent an invite to <@${target.id}>!`
         });
 
-        target.createDM().then(dm => {
+        target.createDM().then(async dm => {
             const embed = new MessageEmbed()
                 .setTitle("Invitation")
                 .setColor("GREEN")
@@ -92,18 +101,42 @@ export default class InviteCommand extends BaseCommand {
                         .setLabel("Deny"),    
                 );
             
-            dm.send({
+            const m = await dm.send({
                 embeds: [embed],
                 components: [buttons]
             });
+
+            if (invite) {
+                invite.message = m.id;
+                invite.save();
+            }
         }).catch(err => {
             interaction.editReply({
                 content: `<@${target.id}> should enable DMs from this server in order to accept the invitation!`
             });
         });
+
+        this.lastSent.set(target.id,new Date());
     }
 
     private async cancelInvite(interaction: CommandInteraction,target: User): Promise<void> {
+        const invite = await Invite.findOne({from: interaction.user.id,to: target.id}).exec();
+        
+        if (!invite) {
+            interaction.editReply({
+                content: `You don't have a pending invite for <@${target.id}>!`
+            });
+            return;
+        }
+
+        if (invite.message) {
+            target.createDM().then(dm => {
+                dm.messages.fetch(invite.message!!).then(msg => msg.delete());
+            });
+        }
+
+        invite.remove();
+
         interaction.editReply({
             content: `Invitation to <@${target.id}> cancelled!`
         });

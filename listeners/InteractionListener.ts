@@ -48,6 +48,24 @@ export default class CommandListener {
     }
 
     private async denyInvite(interaction: ButtonInteraction) {
+        const invite = await Invite.findOne({_id: interaction.message.embeds[0].fields!![0].value}).exec();
 
+        if (!invite) {
+            interaction.editReply({
+                content: "This invite is no longer valid!"
+            });
+            return;
+        }
+
+        const user = await this.client.users.fetch(invite.from!!);
+        user.createDM().then(dm => {
+            dm.send(`Your invitation to <@${invite.to!!}> has been denied.`)
+        }).catch();
+
+        invite.remove();
+
+        interaction.editReply({
+            content: "Invite denied!"
+        });
     }
 }
